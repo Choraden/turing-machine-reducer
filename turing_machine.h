@@ -46,6 +46,8 @@ struct TuringMachine {
     
     std::vector<std::string> parse_input(std::string input) const;
     // ERROR <=> input!="" && returned_value.empty()
+
+    TuringMachine reduce_two_tapes_to_one();
 };
 
 static inline std::ostream &operator<<(std::ostream &output, const TuringMachine &tm) {

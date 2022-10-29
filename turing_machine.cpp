@@ -277,3 +277,271 @@ vector<string> TuringMachine::parse_input(std::string input) const {
     }
     return res;
 }
+
+int NUMBER_OF_PARENTHESES = 0;
+
+void set_number_of_parentheses(vector<string> working_alphabet) {
+    for (auto letter: working_alphabet) {
+        int paren = 0;
+        for (auto c: letter) {
+            if (c == '(') {
+                paren++;
+            }
+        }
+        if (paren > NUMBER_OF_PARENTHESES) {
+            NUMBER_OF_PARENTHESES = paren;
+        }
+    }
+}
+
+// Makes letter with token which means that the logical head is above this letter.
+string make_logical_head(string letter) {
+    string res;
+    for (int i = 0; i <= NUMBER_OF_PARENTHESES; i++) {
+        res += "(";
+    }
+    res += letter + "-H";
+    for (int i = 0; i <= NUMBER_OF_PARENTHESES; i++) {
+        res += ")";
+    }
+    return res;
+}
+
+// Makes in transition for one tape machine.
+pair<string, vector<string>> make_in(string state, string letter) {
+    return make_pair(state, vector<string>{letter});
+}
+
+// Makes out transition for one tape machine.
+tuple<string, vector<string>, string> make_out(string state, string letter, char dir) {
+    return make_tuple(state, vector<string>{letter}, string{dir});
+}
+
+// Makes state that comes from original state provided by user.
+string make_user_state(string original_state, string move, int tape) {
+    return "(U-" + original_state + "-" + move + "-" + to_string(tape) + ")";
+}
+
+const string INIT_FIND_SECOND_TAPE = "(init-findSecondTape)";
+const string INIT_PUT_SECOND_HEAD = "(init-putSecondHead)";
+const string INIT_PUT_END_OF_SECOND_HEAD = "(init-putEndOfSecondTape)";
+const string INIT_BACK_TO_BORDER = "(init-backToBorder)";
+const string INIT_BACK_TO_FRONT = "(init-backToFront)";
+
+string TAPE_BORDER;
+
+void set_tape_border() {
+    string res;
+    for (int i = 0; i <= NUMBER_OF_PARENTHESES; i++) {
+        res += "(";
+    }
+    res += "tape-border";
+    for (int i = 0; i <= NUMBER_OF_PARENTHESES; i++) {
+        res += ")";
+    }
+
+    TAPE_BORDER = res;
+}
+
+string TAPE_END;
+
+void set_tape_end() {
+    string res;
+    for (int i = 0; i <= NUMBER_OF_PARENTHESES; i++) {
+        res += "(";
+    }
+    res += "tape-end";
+    for (int i = 0; i <= NUMBER_OF_PARENTHESES; i++) {
+        res += ")";
+    }
+
+    TAPE_END = res;
+}
+
+
+const string MOVE_HEAD_RIGHT = "headRight";
+const string MOVE_HEAD_LEFT = "headLeft";
+
+
+const string TO_SECOND_TAPE = "toSecondTape";
+
+const string EXT_TAPE_TAPE_BORDER = "extendTape-tapeBorder";
+const string EXT_TAPE_TAPE_END = "extendTape-tapeEnd";
+const string EXT_TAPE_MOVE_BACK = "extendTape-moveBack";
+
+string extend_tape_with_letter(string letter) {
+    return "extendTape-" + letter;
+}
+
+string extend_tape_back_to_first_tape(string letter) {
+    return "backToFirstTape-" + letter;
+}
+
+// Produce states that will split tape into two and place logical heads.
+transitions_t make_init_states(vector<string> &input_alphabet) {
+    transitions_t res;
+
+    // Put logical head at the front of the tape and start finding second tape.
+    for (auto letter: input_alphabet) {
+        res[make_in(INITIAL_STATE, letter)] = make_out(INIT_FIND_SECOND_TAPE, make_logical_head(letter), HEAD_RIGHT);
+    }
+    res[make_in(INITIAL_STATE, BLANK)] = make_out(INIT_FIND_SECOND_TAPE, make_logical_head(BLANK), HEAD_RIGHT);
+
+
+    // Find second tape.
+    for (auto letter: input_alphabet) {
+        res[make_in(INIT_FIND_SECOND_TAPE, letter)] = make_out(INIT_FIND_SECOND_TAPE, letter, HEAD_RIGHT);
+    }
+
+    // Put tape border, move right.
+    res[make_in(INIT_FIND_SECOND_TAPE, BLANK)] = make_out(INIT_PUT_SECOND_HEAD, TAPE_BORDER, HEAD_RIGHT);
+    // Put logic head at the second tape, move right.
+    res[make_in(INIT_PUT_SECOND_HEAD, BLANK)] = make_out(INIT_PUT_END_OF_SECOND_HEAD, make_logical_head(BLANK), HEAD_RIGHT);
+    // Put tape end.
+    res[make_in(INIT_PUT_END_OF_SECOND_HEAD, BLANK)] = make_out(INIT_BACK_TO_BORDER, TAPE_END, HEAD_LEFT);
+
+    // Back to front of the tape.
+    res[make_in(INIT_BACK_TO_BORDER, make_logical_head(BLANK))] = make_out(INIT_BACK_TO_BORDER, make_logical_head(BLANK), HEAD_LEFT);
+    res[make_in(INIT_BACK_TO_BORDER, TAPE_BORDER)] = make_out(INIT_BACK_TO_FRONT, TAPE_BORDER, HEAD_LEFT);
+    for (auto letter: input_alphabet) {
+        res[make_in(INIT_BACK_TO_FRONT, letter)] = make_out(INIT_BACK_TO_FRONT, letter, HEAD_LEFT);
+    }
+
+    return res;
+}
+
+transitions_t make_one_tape_transitions_from_two(std::pair<std::string, std::vector<std::string>> in, std::tuple<std::string, std::vector<std::string>, std::string> out, vector<string> alphabet) {
+    auto letter_in_tape_1 = in.second[0];
+    auto letter_in_tape_2 = in.second[1];
+    auto letter_out_tape_1 = get<1>(out)[0];
+    auto letter_out_tape_2 = get<1>(out)[1];
+    auto dir_tape_1 = get<2>(out)[0];
+    auto dir_tape_2 = get<2>(out)[1];
+
+    // Save information about input and output letters in state.
+    auto state_in = in.first + "-(" + letter_in_tape_1 + ")-(" + letter_in_tape_2 + ")";
+
+    transitions_t res;
+
+    // Add transition from internal initial state to user-defined start state.
+    if (in.first == INITIAL_STATE) {
+        // Second tape is always empty on the start.
+        if (letter_in_tape_2 == BLANK) {
+            res[make_in(INIT_BACK_TO_FRONT, make_logical_head(letter_in_tape_1))] = make_out(make_user_state(state_in, "", 1), make_logical_head(letter_in_tape_1), HEAD_STAY);
+        }
+    }
+
+    if (dir_tape_1 == HEAD_LEFT) {
+        res[make_in(make_user_state(state_in, "", 1), make_logical_head(letter_in_tape_1))] = make_out(make_user_state(state_in, MOVE_HEAD_LEFT, 1), letter_out_tape_1, HEAD_LEFT);
+        for (auto letter: alphabet) {
+            res[make_in(make_user_state(state_in, MOVE_HEAD_LEFT, 1), letter)] = make_out(make_user_state(state_in, TO_SECOND_TAPE, 1), make_logical_head(letter), HEAD_RIGHT);
+        }
+    }
+
+    if (dir_tape_1 == HEAD_RIGHT) {
+        res[make_in(make_user_state(state_in, "", 1), make_logical_head(letter_in_tape_1))] = make_out(make_user_state(state_in, MOVE_HEAD_RIGHT, 1), letter_out_tape_1, HEAD_RIGHT);
+        for (auto letter: alphabet) {
+            res[make_in(make_user_state(state_in, MOVE_HEAD_RIGHT, 1), letter)] = make_out(make_user_state(state_in, TO_SECOND_TAPE, 1), make_logical_head(letter), HEAD_RIGHT);
+        }
+
+        // Extend first tape if necessary.
+        res[make_in(make_user_state(state_in, MOVE_HEAD_RIGHT, 1), TAPE_BORDER)] = make_out(make_user_state(state_in, EXT_TAPE_TAPE_BORDER, 1), BLANK, HEAD_RIGHT);
+        for (auto letter1: alphabet) {
+            res[make_in(make_user_state(state_in, EXT_TAPE_TAPE_BORDER, 1), letter1)] = make_out(make_user_state(state_in, extend_tape_with_letter(letter1), 1), TAPE_BORDER, HEAD_RIGHT);
+            res[make_in(make_user_state(state_in, EXT_TAPE_TAPE_BORDER, 1), make_logical_head(letter1))] = make_out(make_user_state(state_in, extend_tape_with_letter(make_logical_head(letter1)), 1), TAPE_BORDER, HEAD_RIGHT);
+            for (auto letter2: alphabet) {
+                res[make_in(make_user_state(state_in, extend_tape_with_letter(letter1), 1), letter2)] = make_out(make_user_state(state_in, extend_tape_with_letter(letter2), 1), letter1, HEAD_RIGHT);
+                res[make_in(make_user_state(state_in, extend_tape_with_letter(letter1), 1), make_logical_head(letter2))] = make_out(make_user_state(state_in, extend_tape_with_letter(make_logical_head(letter2)), 1), letter1, HEAD_RIGHT);
+                res[make_in(make_user_state(state_in, extend_tape_with_letter(make_logical_head(letter1)), 1), letter2)] = make_out(make_user_state(state_in, extend_tape_with_letter(letter2), 1), make_logical_head(letter1), HEAD_RIGHT);
+            }
+            res[make_in(make_user_state(state_in, extend_tape_with_letter(letter1), 1), TAPE_END)] = make_out(make_user_state(state_in, EXT_TAPE_TAPE_END, 1), letter1, HEAD_RIGHT);
+            res[make_in(make_user_state(state_in, extend_tape_with_letter(make_logical_head(letter1)), 1), TAPE_END)] = make_out(make_user_state(state_in, EXT_TAPE_TAPE_END, 1), make_logical_head(letter1), HEAD_RIGHT);
+        }
+
+        // Back to moving logical head to the right.
+        res[make_in(make_user_state(state_in, EXT_TAPE_TAPE_END, 1), BLANK)] = make_out(make_user_state(state_in, EXT_TAPE_MOVE_BACK, 1), TAPE_END, HEAD_LEFT);
+        for (auto letter: alphabet) {
+            res[make_in(make_user_state(state_in, EXT_TAPE_MOVE_BACK, 1), letter)] = make_out(make_user_state(state_in, EXT_TAPE_MOVE_BACK, 1), letter, HEAD_LEFT);
+            res[make_in(make_user_state(state_in, EXT_TAPE_MOVE_BACK, 1), make_logical_head(letter))] = make_out(make_user_state(state_in, EXT_TAPE_MOVE_BACK, 1), make_logical_head(letter), HEAD_LEFT);
+        }
+        res[make_in(make_user_state(state_in, EXT_TAPE_MOVE_BACK, 1), TAPE_BORDER)] = make_out(make_user_state(state_in, MOVE_HEAD_RIGHT, 1), TAPE_BORDER, HEAD_LEFT);
+    }
+
+    if (dir_tape_1 == HEAD_STAY) {
+        res[make_in(make_user_state(state_in, "", 1), make_logical_head(letter_in_tape_1))] = make_out(make_user_state(state_in, TO_SECOND_TAPE, 1), make_logical_head(letter_out_tape_1), HEAD_RIGHT);
+    }
+
+    // Move physical head to the logical head on the second tape.
+    for (auto letter: alphabet) {
+        res[make_in(make_user_state(state_in, TO_SECOND_TAPE, 1), letter)] = make_out(make_user_state(state_in, TO_SECOND_TAPE, 1), letter, HEAD_RIGHT);
+        res[make_in(make_user_state(state_in, TO_SECOND_TAPE, 1), TAPE_BORDER)] = make_out(make_user_state(state_in, TO_SECOND_TAPE, 2), TAPE_BORDER, HEAD_RIGHT);
+        res[make_in(make_user_state(state_in, TO_SECOND_TAPE, 2), letter)] = make_out(make_user_state(state_in, TO_SECOND_TAPE, 2), letter, HEAD_RIGHT);
+    }
+
+    if (dir_tape_2 == HEAD_LEFT) {
+        res[make_in(make_user_state(state_in, TO_SECOND_TAPE, 2), make_logical_head(letter_in_tape_2))] = make_out(make_user_state(state_in, MOVE_HEAD_LEFT, 2), letter_out_tape_2, HEAD_LEFT);
+        for (auto letter: alphabet) {
+            res[make_in(make_user_state(state_in, MOVE_HEAD_LEFT, 2), letter)] = make_out(make_user_state(state_in, extend_tape_back_to_first_tape(letter), 2), make_logical_head(letter), HEAD_LEFT);
+        }
+    }
+
+    if (dir_tape_2 == HEAD_RIGHT) {
+        res[make_in(make_user_state(state_in, TO_SECOND_TAPE, 2), make_logical_head(letter_in_tape_2))] = make_out(make_user_state(state_in, MOVE_HEAD_RIGHT, 2), letter_out_tape_2, HEAD_RIGHT);
+        for (auto letter: alphabet) {
+            res[make_in(make_user_state(state_in, MOVE_HEAD_RIGHT, 2), letter)] = make_out(make_user_state(state_in, extend_tape_back_to_first_tape(letter), 2), make_logical_head(letter), HEAD_LEFT);
+        }
+
+        // Extend second tape if necessary.
+        res[make_in(make_user_state(state_in, MOVE_HEAD_RIGHT, 2), TAPE_END)] = make_out(make_user_state(state_in, EXT_TAPE_TAPE_END, 2), BLANK, HEAD_RIGHT);
+        // Back to moving logical head to the right.
+        res[make_in(make_user_state(state_in, EXT_TAPE_TAPE_END, 2), BLANK)] = make_out(make_user_state(state_in, MOVE_HEAD_RIGHT, 2), TAPE_END, HEAD_LEFT);
+    }
+
+    if (dir_tape_2 == HEAD_STAY) {
+        res[make_in(make_user_state(state_in, TO_SECOND_TAPE, 2), make_logical_head(letter_in_tape_2))] = make_out(make_user_state(state_in, extend_tape_back_to_first_tape(letter_out_tape_2), 2), make_logical_head(letter_out_tape_2), HEAD_LEFT);
+    }
+
+    // Move physical head back to the logical head on the first tape.
+    for (auto letter1: alphabet) {
+        for (auto letter2: alphabet) {
+            res[make_in(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 2), letter2)] = make_out(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 2), letter2, HEAD_LEFT);
+            res[make_in(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 2), TAPE_BORDER)] = make_out(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 1), TAPE_BORDER, HEAD_LEFT);
+            res[make_in(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 1), letter2)] = make_out(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 1), letter2, HEAD_LEFT);
+        }
+    }
+
+    // Add Out state, which connects different states.
+    for (auto letter1: alphabet) {
+        for (auto letter2: alphabet) {
+            // Notice that it is not necessary to check for REJECTING_STATE here, as there are simply no transitions starting from REJECT_STATE, so it will be automatically rejected.
+            if (get<0>(out) == ACCEPTING_STATE) {
+                res[make_in(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 1), make_logical_head(letter2))] = make_out(ACCEPTING_STATE, make_logical_head(letter2), HEAD_STAY);
+            } else {
+                auto state_out = get<0>(out) + "-(" + letter2 + ")-(" + letter1 + ")";
+                res[make_in(make_user_state(state_in, extend_tape_back_to_first_tape(letter1), 1), make_logical_head(letter2))] = make_out(make_user_state(state_out, "", 1), make_logical_head(letter2), HEAD_STAY);
+            }
+        }
+    }
+
+    return res;
+}
+
+TuringMachine TuringMachine::reduce_two_tapes_to_one() {
+    assert(num_tapes == 2 && "Number of tapes different from 2");
+    set_number_of_parentheses(working_alphabet());
+    set_tape_border();
+    set_tape_end();
+
+    transitions_t new_transitions;
+
+    auto init_states = make_init_states(input_alphabet);
+    new_transitions.insert(init_states.begin(), init_states.end());
+
+
+    for (auto transition: transitions) {
+        auto nt = make_one_tape_transitions_from_two(transition.first, transition.second, working_alphabet());
+        new_transitions.insert(nt.begin(), nt.end());
+    }
+
+    return TuringMachine(1, input_alphabet, new_transitions);
+}
